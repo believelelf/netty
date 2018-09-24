@@ -103,6 +103,7 @@ public abstract class AbstractBootstrap<B extends AbstractBootstrap<B, C>, C ext
         if (channelClass == null) {
             throw new NullPointerException("channelClass");
         }
+        // 无参构造，利用反射构建clazz.getConstructor().newInstance();
         return channelFactory(new ReflectiveChannelFactory<C>(channelClass));
     }
 
@@ -166,6 +167,7 @@ public abstract class AbstractBootstrap<B extends AbstractBootstrap<B, C>, C ext
     /**
      * Allow to specify a {@link ChannelOption} which is used for the {@link Channel} instances once they got
      * created. Use a value of {@code null} to remove a previous set {@link ChannelOption}.
+     * 设置或移除option
      */
     public <T> B option(ChannelOption<T> option, T value) {
         if (option == null) {
@@ -269,16 +271,20 @@ public abstract class AbstractBootstrap<B extends AbstractBootstrap<B, C>, C ext
 
     /**
      * Create a new {@link Channel} and bind it.
+     * 服务端启动最后一步，就是绑定本地端口，启动服务。
      */
     public ChannelFuture bind(SocketAddress localAddress) {
+        // 校验参数是否设置
         validate();
         if (localAddress == null) {
             throw new NullPointerException("localAddress");
         }
+        // 绑定端口
         return doBind(localAddress);
     }
 
     private ChannelFuture doBind(final SocketAddress localAddress) {
+        // 初始化及注册channel
         final ChannelFuture regFuture = initAndRegister();
         final Channel channel = regFuture.channel();
         if (regFuture.cause() != null) {
@@ -317,7 +323,9 @@ public abstract class AbstractBootstrap<B extends AbstractBootstrap<B, C>, C ext
     final ChannelFuture initAndRegister() {
         Channel channel = null;
         try {
+            // 根据class反射创建Channel
             channel = channelFactory.newChannel();
+            //初始化channel,子类实现
             init(channel);
         } catch (Throwable t) {
             if (channel != null) {
@@ -329,7 +337,9 @@ public abstract class AbstractBootstrap<B extends AbstractBootstrap<B, C>, C ext
             // as the Channel is not registered yet we need to force the usage of the GlobalEventExecutor
             return new DefaultChannelPromise(new FailedChannel(), GlobalEventExecutor.INSTANCE).setFailure(t);
         }
-
+        // 调用EventLoopGroup进行注册：注册NioServerSocketChannel到Reactor线程的多路复用器Selector上，然后轮询客户端连接事件,最终调用EventLoop(SingleThreadEventLoop)的register
+        // -->AbstractChannel.AbstractUnsafe#register
+        // --> AbstractNioChannel#doRegister
         ChannelFuture regFuture = config().group().register(channel);
         if (regFuture.cause() != null) {
             if (channel.isRegistered()) {
@@ -373,6 +383,7 @@ public abstract class AbstractBootstrap<B extends AbstractBootstrap<B, C>, C ext
 
     /**
      * the {@link ChannelHandler} to use for serving the requests.
+     * 父类的handler是客户端新接入连接socketChannel对应的ChannelPipeline的Handler,本质上是一个工厂类，它为每一个新接入的客户端创建一个新的Handler
      */
     public B handler(ChannelHandler handler) {
         if (handler == null) {

@@ -32,6 +32,7 @@ import java.util.concurrent.ThreadFactory;
 
 /**
  * {@link MultithreadEventLoopGroup} implementations which is used for NIO {@link Selector} based {@link Channel}s.
+ * NioEventLoopGroup实际就是Reactor线程池（implements ScheduledExecutorService），负责调度和执行客户端的接入，网络读写事件的处理、用户自定义任务的定时任务的执行。
  */
 public class NioEventLoopGroup extends MultithreadEventLoopGroup {
 

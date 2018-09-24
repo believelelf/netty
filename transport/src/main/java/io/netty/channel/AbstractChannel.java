@@ -473,8 +473,10 @@ public abstract class AbstractChannel extends DefaultAttributeMap implements Cha
             AbstractChannel.this.eventLoop = eventLoop;
 
             if (eventLoop.inEventLoop()) {
+                // 首先判断是否是NioEventLoop自身发起的操作。如果是，则不存在并发操作，直接执行channel的注册
                 register0(promise);
             } else {
+                //如果是由其它线程发起，则封装成一个task放入消息队列中异步执行
                 try {
                     eventLoop.execute(new Runnable() {
                         @Override
@@ -501,6 +503,7 @@ public abstract class AbstractChannel extends DefaultAttributeMap implements Cha
                     return;
                 }
                 boolean firstRegistration = neverRegistered;
+                // 注册逻辑
                 doRegister();
                 neverRegistered = false;
                 registered = true;
@@ -510,11 +513,14 @@ public abstract class AbstractChannel extends DefaultAttributeMap implements Cha
                 pipeline.invokeHandlerAddedIfNeeded();
 
                 safeSetSuccess(promise);
+                // 注册成功后，触发ChannelRegistered注册事件。
                 pipeline.fireChannelRegistered();
                 // Only fire a channelActive if the channel has never been registered. This prevents firing
                 // multiple channel actives if the channel is deregistered and re-registered.
+
                 if (isActive()) {
                     if (firstRegistration) {
+                        // 如果服务羰Channel active或对于客户端是connected,且Channel是首次注册，触发channelActive事件。
                         pipeline.fireChannelActive();
                     } else if (config().isAutoRead()) {
                         // This channel was registered before and autoRead() is set. This means we need to begin read

@@ -381,8 +381,11 @@ public abstract class AbstractNioChannel extends AbstractChannel {
     @Override
     protected void doRegister() throws Exception {
         boolean selected = false;
+        // 自旋，直至注册成功
         for (;;) {
             try {
+                // 将NioServerSocketChannel注册到NioEventLoop的Selector上，将赋值给成员变量selectionKey。 ops:0,表只注册，不监听任何网络操作
+                // selectionKey#interestOps(int ops)可以方便地修改监听操作位。
                 selectionKey = javaChannel().register(eventLoop().unwrappedSelector(), 0, this);
                 return;
             } catch (CancelledKeyException e) {
@@ -414,7 +417,7 @@ public abstract class AbstractNioChannel extends AbstractChannel {
         }
 
         readPending = true;
-
+        //由于不同类型的channel对读操作的准备工作不同，因此，beginRead也是个多态方法，对于nio通信，无论客户端还是服务端，都要修改网络操作位为自身感兴趣的，对于NioServerSocketChannel感兴趣的操作是OP_ACCEPT(16)
         final int interestOps = selectionKey.interestOps();
         if ((interestOps & readInterestOp) == 0) {
             selectionKey.interestOps(interestOps | readInterestOp);
