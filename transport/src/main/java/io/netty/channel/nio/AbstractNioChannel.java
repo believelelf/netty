@@ -251,15 +251,18 @@ public abstract class AbstractNioChannel extends AbstractChannel {
                 }
 
                 boolean wasActive = isActive();
+                // 连接操作
                 if (doConnect(remoteAddress, localAddress)) {
                     fulfillConnectPromise(promise, wasActive);
                 } else {
                     connectPromise = promise;
                     requestedRemoteAddress = remoteAddress;
 
+                    // 对于SocketChannel接口，JDK没有提供连接超时机制，需要NIO框架或者用户自已扩展实现。Netty利用定时器提供了客户端连接超时控制功能。
                     // Schedule connect timeout.
                     int connectTimeoutMillis = config().getConnectTimeoutMillis();
                     if (connectTimeoutMillis > 0) {
+                        //设置定时任务
                         connectTimeoutFuture = eventLoop().schedule(new Runnable() {
                             @Override
                             public void run() {
@@ -267,12 +270,13 @@ public abstract class AbstractNioChannel extends AbstractChannel {
                                 ConnectTimeoutException cause =
                                         new ConnectTimeoutException("connection timed out: " + remoteAddress);
                                 if (connectPromise != null && connectPromise.tryFailure(cause)) {
+                                    //关闭客户端连接，释放句柄
                                     close(voidPromise());
                                 }
                             }
                         }, connectTimeoutMillis, TimeUnit.MILLISECONDS);
                     }
-
+                    // 设置监听器，如果连接成功，取消定时任务。
                     promise.addListener(new ChannelFutureListener() {
                         @Override
                         public void operationComplete(ChannelFuture future) throws Exception {
@@ -307,6 +311,7 @@ public abstract class AbstractNioChannel extends AbstractChannel {
 
             // Regardless if the connection attempt was cancelled, channelActive() event should be triggered,
             // because what happened is what happened.
+            //连接成功，触发ChannelActive事件
             if (!wasActive && active) {
                 pipeline().fireChannelActive();
             }

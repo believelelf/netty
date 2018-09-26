@@ -160,6 +160,7 @@ public class Bootstrap extends AbstractBootstrap<Bootstrap, Channel> {
      * @see #connect()
      */
     private ChannelFuture doResolveAndConnect(final SocketAddress remoteAddress, final SocketAddress localAddress) {
+        // 初始化channel并注册NioSocketChannel到Selector上
         final ChannelFuture regFuture = initAndRegister();
         final Channel channel = regFuture.channel();
 
@@ -167,6 +168,7 @@ public class Bootstrap extends AbstractBootstrap<Bootstrap, Channel> {
             if (!regFuture.isSuccess()) {
                 return regFuture;
             }
+            // 开始连接逻辑
             return doResolveAndConnect0(channel, remoteAddress, localAddress, channel.newPromise());
         } else {
             // Registration future is almost always fulfilled already, but just in case it's not.
@@ -245,10 +247,12 @@ public class Bootstrap extends AbstractBootstrap<Bootstrap, Channel> {
         // This method is invoked before channelRegistered() is triggered.  Give user handlers a chance to set up
         // the pipeline in its channelRegistered() implementation.
         final Channel channel = connectPromise.channel();
+        // 链路创建成功之后，发起异步的TCP连接
         channel.eventLoop().execute(new Runnable() {
             @Override
             public void run() {
                 if (localAddress == null) {
+                    // 调用io.netty.channel.nio.AbstractNioChannel.AbstractNioUnsafe.connect
                     channel.connect(remoteAddress, connectPromise);
                 } else {
                     channel.connect(remoteAddress, localAddress, connectPromise);
