@@ -391,6 +391,7 @@ public abstract class SingleThreadEventExecutor extends AbstractScheduledEventEx
      */
     protected boolean runAllTasks(long timeoutNanos) {
         fetchFromScheduledTaskQueue();
+        // 取任务
         Runnable task = pollTask();
         if (task == null) {
             afterRunningAllTasks();
@@ -401,6 +402,7 @@ public abstract class SingleThreadEventExecutor extends AbstractScheduledEventEx
         long runTasks = 0;
         long lastExecutionTime;
         for (;;) {
+            // 循环从任务队列中获取任务task并执行
             safeExecute(task);
 
             runTasks ++;
@@ -408,6 +410,9 @@ public abstract class SingleThreadEventExecutor extends AbstractScheduledEventEx
             // Check timeout every 64 tasks because nanoTime() is relatively expensive.
             // XXX: Hard-coded value - will make it configurable if it is really a problem.
             if ((runTasks & 0x3F) == 0) {
+                // 0x3F-->0011 11111->64
+                // 0x4F-->0100 0000 ->65
+                // runTasks为65时与64进行位与运算为0
                 lastExecutionTime = ScheduledFutureTask.nanoTime();
                 if (lastExecutionTime >= deadline) {
                     break;
@@ -773,10 +778,12 @@ public abstract class SingleThreadEventExecutor extends AbstractScheduledEventEx
         if (task == null) {
             throw new NullPointerException("task");
         }
-
+        // 判断线程是否已经启动循环执行
         boolean inEventLoop = inEventLoop();
+        // 先把任务加入任务队列中
         addTask(task);
         if (!inEventLoop) {
+            // 如果线程未启动循环执行，则线程执行
             startThread();
             if (isShutdown() && removeTask(task)) {
                 reject();
@@ -868,6 +875,7 @@ public abstract class SingleThreadEventExecutor extends AbstractScheduledEventEx
 
     private static final long SCHEDULE_PURGE_INTERVAL = TimeUnit.SECONDS.toNanos(1);
 
+    //  开启线程执行
     private void startThread() {
         if (state == ST_NOT_STARTED) {
             if (STATE_UPDATER.compareAndSet(this, ST_NOT_STARTED, ST_STARTED)) {
@@ -894,6 +902,7 @@ public abstract class SingleThreadEventExecutor extends AbstractScheduledEventEx
                 boolean success = false;
                 updateLastExecutionTime();
                 try {
+                    // 调用子类的NioEventLoop.run方法
                     SingleThreadEventExecutor.this.run();
                     success = true;
                 } catch (Throwable t) {

@@ -320,6 +320,7 @@ public class PooledByteBufAllocator extends AbstractByteBufAllocator implements 
         PoolArena<ByteBuffer> directArena = cache.directArena;
 
         final ByteBuf buf;
+        //从缓存Cache中获取内存区域PoolArena，调用它的allocate方法进行内存分配
         if (directArena != null) {
             buf = directArena.allocate(cache, initialCapacity, maxCapacity);
         } else {

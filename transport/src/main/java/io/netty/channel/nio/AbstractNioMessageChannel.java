@@ -130,9 +130,12 @@ public abstract class AbstractNioMessageChannel extends AbstractNioChannel {
         final SelectionKey key = selectionKey();
         final int interestOps = key.interestOps();
 
+        // 在循环体内对消息进行发送
         for (;;) {
+            // 从ChannelOutboundBuffer中弹出一条消息进行处理
             Object msg = in.current();
             if (msg == null) {
+                // 消息为空，说明所有消息已经被处理，清除写半包标识，退出循环。
                 // Wrote all messages.
                 if ((interestOps & SelectionKey.OP_WRITE) != 0) {
                     key.interestOps(interestOps & ~SelectionKey.OP_WRITE);
@@ -140,8 +143,11 @@ public abstract class AbstractNioMessageChannel extends AbstractNioChannel {
                 break;
             }
             try {
+                // 利用writeSpinCount对单条消息进行发送（即限定发送次数）
                 boolean done = false;
                 for (int i = config().getWriteSpinCount() - 1; i >= 0; i--) {
+                    // 调用子类实现的doWriteMessage进行发送
+                    // 如果发送成功，标识发送成功，退出单条消息发送的循环，否则进行重试
                     if (doWriteMessage(msg, in)) {
                         done = true;
                         break;
@@ -149,8 +155,10 @@ public abstract class AbstractNioMessageChannel extends AbstractNioChannel {
                 }
 
                 if (done) {
+                    // 如果发送成功，从当前消息从ChannelOutboundBuffer进行移除
                     in.remove();
                 } else {
+                    // 如果一次都没有发送成功，说明TCP缓冲区可能满了，出现ZERO_WINDOW，注册OP_WRITE,退出循环。等待后续Selector轮询。防止CPU空转
                     // Did not write all messages.
                     if ((interestOps & SelectionKey.OP_WRITE) == 0) {
                         key.interestOps(interestOps | SelectionKey.OP_WRITE);

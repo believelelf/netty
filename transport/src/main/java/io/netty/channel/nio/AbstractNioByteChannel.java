@@ -112,6 +112,7 @@ public abstract class AbstractNioByteChannel extends AbstractNioChannel {
 
         private void handleReadException(ChannelPipeline pipeline, ByteBuf byteBuf, Throwable cause, boolean close,
                 RecvByteBufAllocator.Handle allocHandle) {
+            // 未完成数据处理
             if (byteBuf != null) {
                 if (byteBuf.isReadable()) {
                     readPending = false;
@@ -120,36 +121,49 @@ public abstract class AbstractNioByteChannel extends AbstractNioChannel {
                     byteBuf.release();
                 }
             }
+            // 发布事件
             allocHandle.readComplete();
             pipeline.fireChannelReadComplete();
             pipeline.fireExceptionCaught(cause);
             if (close || cause instanceof IOException) {
+                // 处理统一事件
                 closeOnRead(pipeline);
             }
         }
 
         @Override
         public final void read() {
+            // 获取NioSocketChannel的SocketChannelConfig,主用用于设置客户端连接的TCP参数
             final ChannelConfig config = config();
             if (shouldBreakReadReady(config)) {
+                //Set read pending to {@code false}.
                 clearReadPending();
                 return;
             }
+            // 获取ChannelPipeline
             final ChannelPipeline pipeline = pipeline();
+            // 从SocketChannelConfig中获取默认的allocator，并创建allocHandle
             final ByteBufAllocator allocator = config.getAllocator();
             final RecvByteBufAllocator.Handle allocHandle = recvBufAllocHandle();
+            // 开始循环读之前，重设totalMessages等
             allocHandle.reset(config);
-
+            //RecvByteBufAllocator 主要有两个实现类：FixedRecvByteBufAllocator及AdaptiveRecvByteBufAllocator
+            //AdaptiveRecvByteBufAllocator是个缓冲区大小可以动态调整的ByteBuf分配器，内部定义了长度的向量表SIZE_TABLE，用于动态调整逻辑
             ByteBuf byteBuf = null;
             boolean close = false;
             try {
                 do {
+                    // 动态分配一个ByteBuf，初始容量1024字节，容量来自于Handle.guess()方法
                     byteBuf = allocHandle.allocate(allocator);
+                    //Set the bytes that have been read for the last read operation.
+                    // doReadBytes 由NioSocketChannel实现，从NIO SocketChannel读取消息到ByteBuf中
                     allocHandle.lastBytesRead(doReadBytes(byteBuf));
+                    // 小于或等于0，连接关闭或未读取到消息
                     if (allocHandle.lastBytesRead() <= 0) {
                         // nothing was read. release the buffer.
                         byteBuf.release();
                         byteBuf = null;
+                        // 连接关闭
                         close = allocHandle.lastBytesRead() < 0;
                         if (close) {
                             // There is nothing left to read as we received an EOF.
@@ -158,19 +172,25 @@ public abstract class AbstractNioByteChannel extends AbstractNioChannel {
                         break;
                     }
 
+                    // 读取到了消息
                     allocHandle.incMessagesRead(1);
                     readPending = false;
+                    // 完成一次异步读之后，就会触发一次ChannelRead事件。并不意味着读取了一条完整的消息，需要ChannelHandler进行半包处理。
                     pipeline.fireChannelRead(byteBuf);
                     byteBuf = null;
+                    // 根据allocHandle规则，判断是否继续循环读。见MaxMessageHandle.continueReading
                 } while (allocHandle.continueReading());
 
+                // read完成，触发事件
                 allocHandle.readComplete();
                 pipeline.fireChannelReadComplete();
 
+                // 对方连接关闭，关闭本方Channel
                 if (close) {
                     closeOnRead(pipeline);
                 }
             } catch (Throwable t) {
+                // 统一异常处理
                 handleReadException(pipeline, byteBuf, t, close, allocHandle);
             } finally {
                 // Check if there is a readPending which was not processed yet.
@@ -212,17 +232,29 @@ public abstract class AbstractNioByteChannel extends AbstractNioChannel {
     private int doWriteInternal(ChannelOutboundBuffer in, Object msg) throws Exception {
         if (msg instanceof ByteBuf) {
             ByteBuf buf = (ByteBuf) msg;
-            if (!buf.isReadable()) {
+            // 如果当前消息的可读字节数为0，说明当前消息不可读，进行丢弃，返回未处理0
+            if (!buf.isReadable()) { // readerIndex> writerIndex --> false
+               // 从环形数组中移除
                 in.remove();
                 return 0;
             }
-
+            // 调用子类实现doWriteBytes进行消息发送
+            // 1）如果本次发送的字节数为0，说明发送TCP缓冲区已满，发生了ZERO_WINDOW(滑动窗口为0)，
+            // 返回WRITE_STATUS_SNDBUF_FULL（Integer.MAX_VALUE）,直接退出循环，setOpWrite=true，释放I/O线程,等待后续轮询
+            // doWriteBytes在NioSocketChannel的实现，写入java.nio.channel中 buf.readBytes(javaChannel(), expectedWrittenBytes);
             final int localFlushedAmount = doWriteBytes(buf);
+            // 2）如果发送字节数大于0，则对发送总数进行计数，
+            //  判断当前消息是否已经发送成功（缓冲区没有可读字节），如果发送成功就是从环形数组中移除对当前ByteBuf
+            // 如果没有，则保留待后续继续发送
             if (localFlushedAmount > 0) {
+                // 调用ChannelOutboundBuffer更新发送进度信息
                 in.progress(localFlushedAmount);
+                // 判断是否发送成功
                 if (!buf.isReadable()) {
+                    // 成功，移除
                     in.remove();
                 }
+                // 当前次发送计数1
                 return 1;
             }
         } else if (msg instanceof FileRegion) {
@@ -244,23 +276,29 @@ public abstract class AbstractNioByteChannel extends AbstractNioChannel {
             // Should not reach here.
             throw new Error();
         }
+        // 缓冲区满
         return WRITE_STATUS_SNDBUF_FULL;
     }
 
     @Override
     protected void doWrite(ChannelOutboundBuffer in) throws Exception {
+        // 取得配置中的最大循环发送次数
         int writeSpinCount = config().getWriteSpinCount();
         do {
+            // 从当前ChannelOutboundBuffer（环形数组）中弹出一条消息
             Object msg = in.current();
             if (msg == null) {
+                // 如果消息为空，说明消息发送数组所有待发送消息已经发送完成，清除半包标识，并退出循环
                 // Wrote all messages.
                 clearOpWrite();
                 // Directly return here so incompleteWrite(...) is not called.
                 return;
             }
+            // 消息不为空，进行消息处理，循环总数减去处理结果，有可能当前处理没有写，返回0的情况，后续要进行半包处理
             writeSpinCount -= doWriteInternal(in, msg);
         } while (writeSpinCount > 0);
 
+        // 进行半包处理，
         incompleteWrite(writeSpinCount < 0);
     }
 
@@ -286,6 +324,7 @@ public abstract class AbstractNioByteChannel extends AbstractNioChannel {
     protected final void incompleteWrite(boolean setOpWrite) {
         // Did not write completely.
         if (setOpWrite) {
+            // 设置OP_WRITE,等待多路复用器Selector不断轮询对应的Channel，用于处理没有发送完成的半包消息。（ZERO_WINDOW 防止CPU空转）
             setOpWrite();
         } else {
             // It is possible that we have set the write OP, woken up by NIO because the socket is writable, and then
@@ -293,7 +332,9 @@ public abstract class AbstractNioByteChannel extends AbstractNioChannel {
             // writable (as far as we know). We will find out next time we attempt to write if the socket is writable
             // and set the write OP if necessary.
             clearOpWrite();
-
+            // 如果没有设置OP_WRITE操作位，需要启动独立的Runnable,将其加入到EventLoop中执行，
+            // 由Runnable负责半包消息的发送，实现方法为调用flush0()方法来发送缓存数组的消息。
+            // 即异步发起下一次doWrite(ChannelOutboundBuffer in)操作
             // Schedule flush again later so other tasks can be picked up in the meantime
             eventLoop().execute(flushTask);
         }
@@ -341,6 +382,7 @@ public abstract class AbstractNioByteChannel extends AbstractNioChannel {
         if (!key.isValid()) {
             return;
         }
+        // 获取当前标识位，判断是否注册了OP_WRITE,如注册了，进行位与反OP_WRITE运算，清除OP_WRITE标识位
         final int interestOps = key.interestOps();
         if ((interestOps & SelectionKey.OP_WRITE) != 0) {
             key.interestOps(interestOps & ~SelectionKey.OP_WRITE);

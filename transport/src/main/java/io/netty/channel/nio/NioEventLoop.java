@@ -465,10 +465,12 @@ public final class NioEventLoop extends SingleThreadEventLoop {
                     } finally {
                         // Ensure we always run tasks.
                         final long ioTime = System.nanoTime() - ioStartTime;
+                        // 按io比例执行任务task
                         runAllTasks(ioTime * (100 - ioRatio) / ioRatio);
                     }
                 }
             } catch (Throwable t) {
+                // 捕获Throwable之后，即便发生了未知异常，线程也不会跑飞，它休眠1s,防止死循环导致的异常绕接，然后恢复执行
                 handleLoopException(t);
             }
             // Always handle shutdown even if the loop processing threw an exception.
@@ -793,12 +795,14 @@ public final class NioEventLoop extends SingleThreadEventLoop {
                     selectCnt = 1;
                 } else if (SELECTOR_AUTO_REBUILD_THRESHOLD > 0 &&
                         selectCnt >= SELECTOR_AUTO_REBUILD_THRESHOLD) {
+                    // 发生epoll bug
                     // The selector returned prematurely many times in a row.
                     // Rebuild the selector to work around the problem.
                     logger.warn(
                             "Selector.select() returned prematurely {} times in a row; rebuilding Selector {}.",
                             selectCnt, selector);
 
+                    // 将问题Selector上注册的Channel转换到新Selector上，关闭老Selector
                     rebuildSelector();
                     selector = this.selector;
 
