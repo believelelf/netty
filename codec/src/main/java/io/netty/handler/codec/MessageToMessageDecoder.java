@@ -79,17 +79,23 @@ public abstract class MessageToMessageDecoder<I> extends ChannelInboundHandlerAd
 
     @Override
     public void channelRead(ChannelHandlerContext ctx, Object msg) throws Exception {
+        // 1.创建一个可循环利用的CodecOutputList
         CodecOutputList out = CodecOutputList.newInstance();
         try {
+            // 对解码消息类型进行判断，通过类型参数校验器看是否是可接受的类型
+            // 见TypeParameterMatcher实现
             if (acceptInboundMessage(msg)) {
                 @SuppressWarnings("unchecked")
                 I cast = (I) msg;
                 try {
+                    // 调用子类实现解码
                     decode(ctx, cast, out);
                 } finally {
+                    // 释放原解码对象
                     ReferenceCountUtil.release(cast);
                 }
             } else {
+                // 类型不符合，直接进行透传
                 out.add(msg);
             }
         } catch (DecoderException e) {
@@ -97,10 +103,12 @@ public abstract class MessageToMessageDecoder<I> extends ChannelInboundHandlerAd
         } catch (Exception e) {
             throw new DecoderException(e);
         } finally {
+            // 循环触发fireChannelRead事件
             int size = out.size();
             for (int i = 0; i < size; i ++) {
                 ctx.fireChannelRead(out.getUnsafe(i));
             }
+            // 回收释放CodecOutputList
             out.recycle();
         }
     }

@@ -158,6 +158,7 @@ public class LengthFieldPrepender extends MessageToMessageEncoder<ByteBuf> {
 
     @Override
     protected void encode(ChannelHandlerContext ctx, ByteBuf msg, List<Object> out) throws Exception {
+       // 判断是否包含长度字段本身的长度
         int length = msg.readableBytes() + lengthAdjustment;
         if (lengthIncludesLengthFieldLength) {
             length += lengthFieldLength;
@@ -167,7 +168,7 @@ public class LengthFieldPrepender extends MessageToMessageEncoder<ByteBuf> {
             throw new IllegalArgumentException(
                     "Adjusted frame length (" + length + ") is less than zero");
         }
-
+        // 根据lengthFieldLength分配ByteBuf长度，并写入长度字节
         switch (lengthFieldLength) {
         case 1:
             if (length >= 256) {
@@ -199,6 +200,7 @@ public class LengthFieldPrepender extends MessageToMessageEncoder<ByteBuf> {
         default:
             throw new Error("should not reach here");
         }
+        //写入消息体内容
         out.add(msg.retain());
     }
 }

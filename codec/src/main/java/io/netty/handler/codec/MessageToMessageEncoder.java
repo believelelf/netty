@@ -114,6 +114,7 @@ public abstract class MessageToMessageEncoder<I> extends ChannelOutboundHandlerA
                     // See https://github.com/netty/netty/issues/2525
                     ChannelPromise voidPromise = ctx.voidPromise();
                     boolean isVoidPromise = promise == voidPromise;
+                    // 循环写
                     for (int i = 0; i < sizeMinusOne; i ++) {
                         ChannelPromise p;
                         if (isVoidPromise) {
@@ -125,6 +126,7 @@ public abstract class MessageToMessageEncoder<I> extends ChannelOutboundHandlerA
                     }
                     ctx.write(out.getUnsafe(sizeMinusOne), promise);
                 }
+                // out回收
                 out.recycle();
             }
         }

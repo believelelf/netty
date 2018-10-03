@@ -99,24 +99,35 @@ public abstract class MessageToByteEncoder<I> extends ChannelOutboundHandlerAdap
     public void write(ChannelHandlerContext ctx, Object msg, ChannelPromise promise) throws Exception {
         ByteBuf buf = null;
         try {
+            // 判断编码对象类型
             if (acceptOutboundMessage(msg)) {
                 @SuppressWarnings("unchecked")
                 I cast = (I) msg;
+                // 进行缓冲区ByteBuf的分配，堆内存或直接内存
                 buf = allocateBuffer(ctx, cast, preferDirect);
                 try {
+                    // 调用子类encode进行编码
                     encode(ctx, cast, buf);
                 } finally {
+                    // 释放编码对象
                     ReferenceCountUtil.release(cast);
                 }
 
+                // 编码完成后，如果缓冲区ByteBuf中包含有可读字节，则调用ChannelHandlerContext.write方法进行发送。
                 if (buf.isReadable()) {
+                    // 取cxt.prev指针，且hanlder满足outbound标识,最终会调用HeadContext.write方法
+                    // DefaultChannelPipeline.HeadContext--满足outbound=true,其inbound=false
+                    // DefaultChannelPipeline.TailContext--满足inbound=true,其outbound=false
                     ctx.write(buf, promise);
                 } else {
+                    // 如果缓冲区无可读字节，进行释放
                     buf.release();
+                    // 写一个空的ByteBuf到ChannelHandlerContext中
                     ctx.write(Unpooled.EMPTY_BUFFER, promise);
                 }
                 buf = null;
             } else {
+                // 类型不匹配，不进行编码，透传
                 ctx.write(msg, promise);
             }
         } catch (EncoderException e) {

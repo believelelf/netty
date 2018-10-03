@@ -254,13 +254,21 @@ public class DefaultChannelPipeline implements ChannelPipeline {
             EventExecutorGroup group, String baseName, String name, ChannelHandler handler) {
         final AbstractChannelHandlerContext newCtx;
         final AbstractChannelHandlerContext ctx;
+        // 由于ChannelPipeline支持运行期动态修改，因此存在两种潜在的多线程并发访问的场景
+        // 1.I/O线程与用户业务线程的并发访问
+        // 2.用户多个线程之间的并发访问
+        // 使用synchronized保证同步块内所有操作原子性
         synchronized (this) {
+            // 校验添加的handler是否支持共享的，如果非共享@Sharable且已经被添加，抛错
             checkMultiplicity(handler);
+            // 对新增的ChannelHandler名进行重复性校验
             name = filterName(name, handler);
+            // 根据baseName获取原Context
             ctx = getContextOrDie(baseName);
-
+            // 构建新的ctx
             newCtx = newContext(group, name, handler);
-
+            // 将新增的handlerContext,插入pipeline中
+            // 链表的指针移动
             addBefore0(ctx, newCtx);
 
             // If the registered is false it means that the channel was not registered on an eventloop yet.
@@ -271,7 +279,7 @@ public class DefaultChannelPipeline implements ChannelPipeline {
                 callHandlerCallbackLater(newCtx, true);
                 return this;
             }
-
+            // 加入成功之后，缓存ChannelHandlerContext,发送新增ChannelHandlerContext的通知消息
             EventExecutor executor = newCtx.executor();
             if (!executor.inEventLoop()) {
                 newCtx.setAddPending();
@@ -553,8 +561,10 @@ public class DefaultChannelPipeline implements ChannelPipeline {
 
         final AbstractChannelHandlerContext newCtx;
         synchronized (this) {
+            // 校验添加的handler是否支持共享的，如果非共享@Sharable且已经被添加，抛错
             checkMultiplicity(newHandler);
             if (newName == null) {
+                // 生成独有的名称
                 newName = generateName(newHandler);
             } else {
                 boolean sameName = ctx.name().equals(newName);
